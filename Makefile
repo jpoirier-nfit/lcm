@@ -1,8 +1,11 @@
-.PHONY: build run clean test install uninstall
+.PHONY: build run clean test install uninstall help fmt lint
 
 # Installation prefix (can be overridden: make install PREFIX=/custom/path)
 PREFIX ?= /usr/local
 BINDIR = $(PREFIX)/bin
+
+# Default target - show help
+.DEFAULT_GOAL := help
 
 # Build the application
 build:
@@ -38,3 +41,28 @@ uninstall:
 	@echo "Removing lcm from $(BINDIR)..."
 	@rm -f $(BINDIR)/lcm
 	@echo "lcm uninstalled successfully"
+
+# Format code
+fmt:
+	go fmt ./...
+
+# Lint code
+lint:
+	@command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint not installed. Run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; exit 1; }
+	golangci-lint run ./...
+
+# Show help
+help:
+	@echo "Local Container Manager (lcm) - Available targets:"
+	@echo ""
+	@echo "  make build      - Build the application"
+	@echo "  make run        - Run the application"
+	@echo "  make test       - Run tests"
+	@echo "  make clean      - Clean build artifacts"
+	@echo "  make deps       - Install/update dependencies"
+	@echo "  make fmt        - Format code with go fmt"
+	@echo "  make lint       - Run linter (requires golangci-lint)"
+	@echo "  make install    - Install to $(PREFIX)/bin (may require sudo)"
+	@echo "  make uninstall  - Uninstall from $(PREFIX)/bin"
+	@echo ""
+	@echo "  Override installation path: make install PREFIX=/custom/path"
