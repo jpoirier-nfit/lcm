@@ -1,4 +1,4 @@
-module github.com/jpoirier-nfit/james_scripts/lcm
+module github.com/jpoirier-nfit/lcm
 
 go 1.25.5
 

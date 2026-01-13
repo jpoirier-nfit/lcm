@@ -11,10 +11,11 @@ A Terminal User Interface (TUI) for managing local Docker containers, built with
 Install using Go tooling (requires Go 1.21+):
 
 ```bash
-# Install from GitHub
 go install github.com/jpoirier-nfit/lcm@latest
+```
 
-# Verify installation
+Verify installation:
+```bash
 lcm
 ```
 
@@ -24,37 +25,54 @@ lcm
 
 Install from source to `/usr/local/bin`:
 
+Clone the repository:
 ```bash
-# Clone the repository
 git clone https://github.com/jpoirier-nfit/lcm.git
+```
+
+```bash
 cd lcm
+```
 
-# Install to /usr/local/bin (requires sudo)
+Install to /usr/local/bin (requires sudo):
+```bash
 sudo make install
+```
 
-# Or install to custom location (e.g., ~/.local/bin)
+Or install to custom location (e.g., ~/.local/bin):
+```bash
 make install PREFIX=$HOME/.local
 ```
 
 ### Build from Source
 
+Clone and build:
 ```bash
-# Clone and build
 git clone https://github.com/jpoirier-nfit/lcm.git
-cd lcm
-make build
+```
 
-# Run locally
+```bash
+cd lcm
+```
+
+```bash
+make build
+```
+
+Run locally:
+```bash
 ./lcm
 ```
 
 ### Uninstall
 
+If installed with make:
 ```bash
-# If installed with make
 sudo make uninstall
+```
 
-# If installed with go install
+If installed with go install:
+```bash
 rm $(go env GOPATH)/bin/lcm
 ```
 
@@ -140,17 +158,23 @@ lcm
 
 ## Development
 
+Install dependencies:
 ```bash
-# Install dependencies
 make deps
+```
 
-# Run tests
+Run tests:
+```bash
 make test
+```
 
-# Build
+Build:
+```bash
 make build
+```
 
-# Clean build artifacts
+Clean build artifacts:
+```bash
 make clean
 ```
 
