@@ -2,6 +2,8 @@
 
 A Terminal User Interface (TUI) for managing local Docker containers, built with Go, Bubbletea, and the Docker API. Supports both **Docker Desktop** and **Rancher Desktop**.
 
+<img width="1742" height="844" alt="image" src="https://github.com/user-attachments/assets/caa98357-f6bd-4658-8d99-b81181679975" />
+
 ## Installation
 
 ### Quick Install (Recommended)
