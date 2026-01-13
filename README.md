@@ -12,7 +12,7 @@ Install using Go tooling (requires Go 1.21+):
 
 ```bash
 # Install from GitHub
-go install github.com/jpoirier-nfit/james_scripts/lcm@latest
+go install github.com/jpoirier-nfit/lcm@latest
 
 # Verify installation
 lcm
@@ -26,8 +26,8 @@ Install from source to `/usr/local/bin`:
 
 ```bash
 # Clone the repository
-git clone https://github.com/jpoirier-nfit/james_scripts.git
-cd james_scripts/lcm
+git clone https://github.com/jpoirier-nfit/lcm.git
+cd lcm
 
 # Install to /usr/local/bin (requires sudo)
 sudo make install
@@ -40,8 +40,8 @@ make install PREFIX=$HOME/.local
 
 ```bash
 # Clone and build
-git clone https://github.com/jpoirier-nfit/james_scripts.git
-cd james_scripts/lcm
+git clone https://github.com/jpoirier-nfit/lcm.git
+cd lcm
 make build
 
 # Run locally
