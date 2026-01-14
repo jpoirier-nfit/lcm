@@ -2,7 +2,8 @@
 
 A Terminal User Interface (TUI) for managing local Docker containers, built with Go, Bubbletea, and the Docker API. Supports multiple container runtimes including **Docker Desktop**, **Rancher Desktop**, **Colima**, **Orbstack**, **Podman**, and **Lima**.
 
-<img width="1742" height="844" alt="image" src="https://github.com/user-attachments/assets/caa98357-f6bd-4658-8d99-b81181679975" />
+<img width="1344" height="362" alt="image" src="https://github.com/user-attachments/assets/77394de5-ab17-42ad-9682-45fff4e97873" />
+
 
 ## Installation
 
