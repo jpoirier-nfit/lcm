@@ -36,3 +36,9 @@ vendor/
 # Build artifacts
 dist/
 build/
+
+# Task management
+#tasks/
+
+# Backup files
+*.bak*
