@@ -25,7 +25,6 @@ const (
 	viewInspect
 	viewLogs
 	viewShell
-	viewSearch
 )
 
 // Color palette and styles
@@ -129,20 +128,6 @@ type Model struct {
 	shellContainerName string  // Container name for display
 	shellExecID       string   // Docker exec session ID
 	shellScroll       int      // Scroll position in shell output
-
-	// Fuzzy search state
-	searchInput   string         // Current search query
-	searchResults []searchResult // Filtered search results
-	searchCursor  int            // Selected result index
-}
-
-// searchResult represents a fuzzy search match
-type searchResult struct {
-	resultType  string // "container" or "command"
-	display     string // Display text
-	description string // Additional info
-	containerID string // Container ID (for container results)
-	command     string // Command key (for command results)
 }
 
 // containerInfo holds display information about a container
@@ -204,63 +189,28 @@ type shellCommandResultMsg struct {
 	err     error
 }
 
-// ContainerPlatform represents a container runtime platform
-type ContainerPlatform struct {
-	Name       string // Display name (e.g., "Docker Desktop", "Colima")
-	SocketPath string // Unix socket path or empty for DOCKER_HOST
-}
-
-// getContainerPlatforms returns all supported container platforms in priority order
-func getContainerPlatforms() []ContainerPlatform {
-	home := os.Getenv("HOME")
-	uid := fmt.Sprintf("%d", os.Getuid())
-
-	return []ContainerPlatform{
-		// Environment variable takes highest priority
-		{Name: "DOCKER_HOST", SocketPath: ""},
-
-		// Docker Desktop
-		{Name: "Docker Desktop", SocketPath: "unix:///var/run/docker.sock"},
-
-		// Rancher Desktop
-		{Name: "Rancher Desktop", SocketPath: "unix://" + home + "/.rd/docker.sock"},
-		{Name: "Rancher Desktop", SocketPath: "unix://" + home + "/.docker/run/docker.sock"},
-
-		// Colima (default profile)
-		{Name: "Colima", SocketPath: "unix://" + home + "/.colima/default/docker.sock"},
-		{Name: "Colima", SocketPath: "unix://" + home + "/.colima/docker.sock"},
-
-		// Orbstack
-		{Name: "Orbstack", SocketPath: "unix://" + home + "/.orbstack/run/docker.sock"},
-
-		// Podman (macOS machine)
-		{Name: "Podman", SocketPath: "unix://" + home + "/.local/share/containers/podman/machine/podman.sock"},
-		{Name: "Podman", SocketPath: "unix://" + home + "/.local/share/containers/podman/machine/qemu/podman.sock"},
-
-		// Podman (Linux user socket)
-		{Name: "Podman", SocketPath: "unix:///run/user/" + uid + "/podman/podman.sock"},
-
-		// Lima (generic)
-		{Name: "Lima", SocketPath: "unix://" + home + "/.lima/default/sock/docker.sock"},
-	}
-}
-
-// tryConnectDocker attempts to connect to a container runtime using multiple platforms
+// tryConnectDocker attempts to connect to Docker using multiple socket paths
 func tryConnectDocker(ctx context.Context) (*client.Client, string, error) {
-	platforms := getContainerPlatforms()
+	// List of socket paths to try, in order of preference
+	socketPaths := []string{
+		"",                                      // Try DOCKER_HOST env var first (empty means use FromEnv)
+		"unix:///var/run/docker.sock",          // Standard Docker Desktop
+		"unix://" + os.Getenv("HOME") + "/.rd/docker.sock",            // Rancher Desktop (older)
+		"unix://" + os.Getenv("HOME") + "/.docker/run/docker.sock",    // Rancher Desktop (newer)
+	}
 
 	var lastErr error
-	for _, platform := range platforms {
+	for _, socketPath := range socketPaths {
 		var cli *client.Client
 		var err error
 
-		if platform.SocketPath == "" {
+		if socketPath == "" {
 			// Try environment variables (DOCKER_HOST)
 			cli, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 		} else {
 			// Try specific socket path
 			cli, err = client.NewClientWithOpts(
-				client.WithHost(platform.SocketPath),
+				client.WithHost(socketPath),
 				client.WithAPIVersionNegotiation(),
 			)
 		}
@@ -278,46 +228,40 @@ func tryConnectDocker(ctx context.Context) (*client.Client, string, error) {
 			continue
 		}
 
-		// Success! Return the platform name
-		displayName := platform.Name
-		if platform.SocketPath == "" {
-			// Check if DOCKER_HOST is set
-			dockerHost := os.Getenv("DOCKER_HOST")
-			if dockerHost != "" {
-				displayName = "DOCKER_HOST (" + dockerHost + ")"
-			} else {
-				continue // Skip if DOCKER_HOST not set
+		// Success!
+		displayPath := socketPath
+		if displayPath == "" {
+			displayPath = os.Getenv("DOCKER_HOST")
+			if displayPath == "" {
+				displayPath = "default (DOCKER_HOST or /var/run/docker.sock)"
 			}
 		}
-		return cli, displayName, nil
+		return cli, displayPath, nil
 	}
 
-	return nil, "", fmt.Errorf("failed to connect to container runtime: %v", lastErr)
+	return nil, "", fmt.Errorf("failed to connect to Docker/Rancher: %v", lastErr)
 }
 
 func main() {
-	// Initialize container client - try multiple platforms
+	// Initialize Docker client - try multiple socket paths
 	ctx := context.Background()
-	cli, platformName, err := tryConnectDocker(ctx)
+	cli, socketPath, err := tryConnectDocker(ctx)
 	if err != nil {
-		fmt.Printf("Error: Cannot connect to any container runtime.\n")
-		fmt.Printf("Tried the following platforms:\n")
+		fmt.Printf("Error: Cannot connect to Docker or Rancher Desktop.\n")
+		fmt.Printf("Tried the following:\n")
 		fmt.Printf("  - DOCKER_HOST environment variable\n")
-		fmt.Printf("  - Docker Desktop (/var/run/docker.sock)\n")
-		fmt.Printf("  - Rancher Desktop (~/.rd/docker.sock, ~/.docker/run/docker.sock)\n")
-		fmt.Printf("  - Colima (~/.colima/default/docker.sock)\n")
-		fmt.Printf("  - Orbstack (~/.orbstack/run/docker.sock)\n")
-		fmt.Printf("  - Podman (~/.local/share/containers/podman/...)\n")
-		fmt.Printf("  - Lima (~/.lima/default/sock/docker.sock)\n")
+		fmt.Printf("  - /var/run/docker.sock (Docker Desktop)\n")
+		fmt.Printf("  - ~/.rd/docker.sock (Rancher Desktop)\n")
+		fmt.Printf("  - ~/.docker/run/docker.sock (Rancher Desktop)\n")
 		fmt.Printf("\nError: %v\n\n", err)
-		fmt.Printf("Please ensure one of the above container runtimes is running.\n")
+		fmt.Printf("Please ensure Docker Desktop or Rancher Desktop is running.\n")
 		os.Exit(1)
 	}
 	defer cli.Close()
 
 	// Initialize the Bubbletea program with alternate screen
 	model := initialModel(ctx, cli)
-	model.socketPath = platformName
+	model.socketPath = socketPath
 	p := tea.NewProgram(
 		model,
 		tea.WithAltScreen(),       // Use alternate screen buffer (full screen)
@@ -357,25 +301,12 @@ func (m Model) loadContainers(showRefresh bool) tea.Cmd {
 			// Remove leading slash from container name
 			name := strings.TrimPrefix(c.Names[0], "/")
 
-		// Format ports
-		var ports []string
-		for _, port := range c.Ports {
-			if port.PublicPort > 0 {
-				// Port is mapped to host
-				ports = append(ports, fmt.Sprintf("%d:%d/%s", port.PublicPort, port.PrivatePort, port.Type))
-			} else {
-				// Port is exposed but not mapped
-				ports = append(ports, fmt.Sprintf("%d/%s", port.PrivatePort, port.Type))
-			}
-		}
-
 			containerList = append(containerList, containerInfo{
 				ID:     c.ID[:12], // Short ID
 				Name:   name,
 				Image:  c.Image,
 				Status: c.Status,
 				State:  c.State,
-			Ports:  ports,
 			})
 		}
 
@@ -663,126 +594,6 @@ func (m Model) executeShellCommand(command string) tea.Cmd {
 	}
 }
 
-// updateSearchResults updates the search results based on current input
-func (m *Model) updateSearchResults() {
-	m.searchResults = []searchResult{}
-	m.searchCursor = 0
-
-	query := strings.ToLower(m.searchInput)
-
-	// Search through containers
-	for _, c := range m.containers {
-		// Check if container matches the query (search name, ID, image, and ports)
-		nameLower := strings.ToLower(c.Name)
-		imageLower := strings.ToLower(c.Image)
-		idLower := strings.ToLower(c.ID)
-		portsLower := strings.ToLower(strings.Join(c.Ports, " "))
-
-		if query == "" || strings.Contains(nameLower, query) ||
-			strings.Contains(imageLower, query) || strings.Contains(idLower, query) ||
-			strings.Contains(portsLower, query) {
-			// Build description with ports if available
-			portsStr := strings.Join(c.Ports, ", ")
-			if portsStr == "" {
-				portsStr = "no ports"
-			}
-			m.searchResults = append(m.searchResults, searchResult{
-				resultType:  "container",
-				display:     c.Name,
-				description: fmt.Sprintf("%s | %s | %s | %s", c.ID, c.Image, portsStr, c.State),
-				containerID: c.ID,
-			})
-		}
-	}
-
-	// Add available commands that match the query
-	commands := []struct {
-		key         string
-		name        string
-		description string
-	}{
-		{"s", "Start", "Start the selected container"},
-		{"t", "Stop", "Stop the selected container"},
-		{"R", "Restart", "Restart the selected container"},
-		{"i", "Inspect", "View container details"},
-		{"l", "Logs", "View container logs"},
-		{"e", "Shell", "Open shell in container"},
-		{"o", "Browser", "Open container port in browser"},
-		{"h", "Toggle K8s", "Show/hide Kubernetes containers"},
-		{"a", "Toggle Exited", "Show/hide exited containers"},
-		{"r", "Refresh", "Refresh container list"},
-	}
-
-	for _, cmd := range commands {
-		cmdLower := strings.ToLower(cmd.name)
-		descLower := strings.ToLower(cmd.description)
-
-		if query == "" || strings.Contains(cmdLower, query) || strings.Contains(descLower, query) {
-			m.searchResults = append(m.searchResults, searchResult{
-				resultType:  "command",
-				display:     fmt.Sprintf("[%s] %s", cmd.key, cmd.name),
-				description: cmd.description,
-				command:     cmd.key,
-			})
-		}
-	}
-}
-
-// executeSearchCommand executes a command from the search results
-func (m *Model) executeSearchCommand(command string) tea.Cmd {
-	switch command {
-	case "s":
-		m.statusMsg = "Starting container..."
-		return m.startContainer
-	case "t":
-		m.statusMsg = "Stopping container..."
-		return m.stopContainer
-	case "R":
-		m.statusMsg = "Restarting container..."
-		return m.restartContainer
-	case "i":
-		m.statusMsg = "Loading inspection data..."
-		return m.inspectContainer
-	case "l":
-		m.statusMsg = "Loading logs..."
-		return m.viewContainerLogs
-	case "e":
-		if len(m.containers) > 0 {
-			containerName := m.containers[m.cursor].Name
-			m.statusMsg = fmt.Sprintf("Opening shell in %s...", containerName)
-			return m.shellIntoContainer()
-		}
-	case "o":
-		if len(m.containers) > 0 {
-			m.statusMsg = "Opening browser..."
-			return m.openBrowserForContainer()
-		}
-	case "h":
-		m.hideK8s = !m.hideK8s
-		m.filterContainers()
-		if m.hideK8s {
-			m.statusMsg = "Hiding Kubernetes containers"
-		} else {
-			m.statusMsg = "Showing Kubernetes containers"
-		}
-		return clearStatusAfterDelay(3 * time.Second)
-	case "a":
-		m.hideExited = !m.hideExited
-		m.filterContainers()
-		if m.hideExited {
-			m.statusMsg = "Hiding exited containers"
-		} else {
-			m.statusMsg = "Showing all containers (including exited)"
-		}
-		return clearStatusAfterDelay(3 * time.Second)
-	case "r":
-		m.loading = true
-		m.statusMsg = ""
-		return m.loadContainers(true)
-	}
-	return nil
-}
-
 // Init is called when the program starts
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
@@ -837,56 +648,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Add character to input
 				if len(msg.String()) == 1 {
 					m.shellInput += msg.String()
-				}
-			}
-		case viewSearch:
-			// In search view, handle search input
-			switch msg.String() {
-			case "esc":
-				// Exit search view
-				m.currentView = viewList
-				m.searchInput = ""
-				m.searchResults = nil
-				m.searchCursor = 0
-			case "enter":
-				// Select the current result
-				if len(m.searchResults) > 0 && m.searchCursor < len(m.searchResults) {
-					result := m.searchResults[m.searchCursor]
-					m.currentView = viewList
-					m.searchInput = ""
-					m.searchResults = nil
-
-					if result.resultType == "container" {
-						// Find and select the container
-						for i, c := range m.containers {
-							if c.ID == result.containerID {
-								m.cursor = i
-								break
-							}
-						}
-					} else if result.resultType == "command" {
-						// Execute the command
-						return m, m.executeSearchCommand(result.command)
-					}
-				}
-			case "up":
-				if m.searchCursor > 0 {
-					m.searchCursor--
-				}
-			case "down":
-				if m.searchCursor < len(m.searchResults)-1 {
-					m.searchCursor++
-				}
-			case "backspace":
-				if len(m.searchInput) > 0 {
-					m.searchInput = m.searchInput[:len(m.searchInput)-1]
-					m.updateSearchResults()
-				}
-			default:
-				// Add character to search input
-				if len(msg.String()) == 1 {
-					m.searchInput += msg.String()
-					m.updateSearchResults()
 				}
 			}
 		case viewList:
@@ -962,12 +723,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				// Clear status after 3 seconds
 				return m, clearStatusAfterDelay(3 * time.Second)
-			case "/":
-				// Open fuzzy search
-				m.currentView = viewSearch
-				m.searchInput = ""
-				m.searchCursor = 0
-				m.updateSearchResults() // Initialize with all results
 			}
 		}
 	case containersLoadedMsg:
@@ -1055,8 +810,6 @@ func (m Model) View() string {
 		return m.viewLogsMode()
 	case viewShell:
 		return m.viewShellMode()
-	case viewSearch:
-		return m.viewSearchMode()
 	default:
 		return m.viewListMode()
 	}
@@ -1069,8 +822,16 @@ func (m Model) viewListMode() string {
 	// Title with styled connection info
 	title := "🐳 Local Container Manager (lcm)"
 	if m.socketPath != "" {
-		// socketPath now contains the platform name directly
-		title += " [Connected to: " + m.socketPath + "]"
+		// Simplify display of socket path
+		displaySocket := m.socketPath
+		if strings.Contains(displaySocket, ".rd/docker.sock") {
+			displaySocket = "Rancher Desktop"
+		} else if strings.Contains(displaySocket, ".docker/run/docker.sock") {
+			displaySocket = "Rancher Desktop"
+		} else if strings.Contains(displaySocket, "/var/run/docker.sock") {
+			displaySocket = "Docker Desktop"
+		}
+		title += " [" + displaySocket + "]"
 	}
 	s.WriteString(titleStyle.Render(title) + "\n\n")
 
@@ -1080,10 +841,10 @@ func (m Model) viewListMode() string {
 		s.WriteString("No containers found.\n")
 	} else {
 		// Calculate how many containers we can show
-		// Account for: title(2) + header(1) + divider(1) + scroll/blank(2) + status(2) + help box(8) = 16 lines overhead
-		availableHeight := m.height - 16
-		if availableHeight < 3 {
-			availableHeight = 3 // Minimum
+		// Account for: title(2) + header(2) + status(2) + filter(2) + help(5) = ~13 lines overhead
+		availableHeight := m.height - 13
+		if availableHeight < 5 {
+			availableHeight = 5 // Minimum
 		}
 
 		// Calculate scroll window
@@ -1108,22 +869,11 @@ func (m Model) viewListMode() string {
 			}
 		}
 
-		// Responsive column layout with STATUS pinned to the right
-		// Fixed widths: ID=12, STATE=8 (covers "running"/"exited"/"created")
-		// Variable widths: NAME, IMAGE, OPENPORTS share remaining space
-		// STATUS: pinned to right edge
-
-		const (
-			idWidth    = 12
-			stateWidth = 8
-			colSpacing = 2  // spaces between columns
-			cursorCol  = 2  // space for cursor indicator
-		)
-
-		// Calculate max content widths for variable columns
-		maxNameLen := len("NAME")
+		// Calculate column widths based on actual content
+		// Find the longest NAME, IMAGE, STATE, and STATUS in the current view
+		maxNameLen := len("NAME") // Start with header length
 		maxImageLen := len("IMAGE")
-		maxPortsLen := len("OPENPORTS")
+		maxStateLen := len("STATE")
 		maxStatusLen := len("STATUS")
 
 		for i := startIdx; i < endIdx; i++ {
@@ -1134,92 +884,50 @@ func (m Model) viewListMode() string {
 			if len(c.Image) > maxImageLen {
 				maxImageLen = len(c.Image)
 			}
-			portsStr := strings.Join(c.Ports, ", ")
-			if portsStr == "" {
-				portsStr = "-"
-			}
-			if len(portsStr) > maxPortsLen {
-				maxPortsLen = len(portsStr)
+			if len(c.State) > maxStateLen {
+				maxStateLen = len(c.State)
 			}
 			if len(c.Status) > maxStatusLen {
 				maxStatusLen = len(c.Status)
 			}
 		}
 
-		// Calculate available width for variable columns
-		// Layout: [cursor] ID  NAME  IMAGE  OPENPORTS  STATE  [gap]  STATUS
-		fixedWidth := cursorCol + idWidth + stateWidth + (6 * colSpacing) + maxStatusLen
-		availableForVariable := m.width - fixedWidth
+		// Add more padding for better spacing
+		nameWidth := maxNameLen + 4
+		imageWidth := maxImageLen + 4
+		stateWidth := maxStateLen + 4
+		statusWidth := maxStatusLen + 4
 
-		// Minimum widths for variable columns
-		minNameWidth := 10
-		minImageWidth := 10
-		minPortsWidth := 9 // "OPENPORTS"
+		// Calculate if we need to constrain widths to fit terminal
+		// Fixed columns: ID(12) + cursor(2) + spacing(10) = 24
+		usedWidth := 24 + nameWidth + imageWidth + stateWidth + statusWidth
 
-		// Distribute available space among NAME, IMAGE, OPENPORTS
-		// Give proportional space based on content, with minimums
-		totalContentWidth := maxNameLen + maxImageLen + maxPortsLen
-		if totalContentWidth == 0 {
-			totalContentWidth = 1
-		}
-
-		var nameWidth, imageWidth, portsWidth int
-
-		if availableForVariable >= totalContentWidth {
-			// Enough space for all content
-			nameWidth = maxNameLen
-			imageWidth = maxImageLen
-			portsWidth = maxPortsLen
-		} else if availableForVariable >= minNameWidth+minImageWidth+minPortsWidth {
-			// Constrained: distribute proportionally with minimums
-			nameWidth = max(minNameWidth, availableForVariable*maxNameLen/totalContentWidth)
-			imageWidth = max(minImageWidth, availableForVariable*maxImageLen/totalContentWidth)
-			portsWidth = max(minPortsWidth, availableForVariable*maxPortsLen/totalContentWidth)
-
-			// Ensure we don't exceed available space
-			for nameWidth+imageWidth+portsWidth > availableForVariable {
-				if imageWidth > minImageWidth {
-					imageWidth--
-				} else if nameWidth > minNameWidth {
-					nameWidth--
-				} else if portsWidth > minPortsWidth {
-					portsWidth--
-				} else {
-					break
+		if usedWidth > m.width {
+			// Need to constrain - prioritize NAME, STATE, and STATUS, truncate IMAGE
+			availableWidth := m.width - 24 - nameWidth - stateWidth - statusWidth
+			if availableWidth < 10 {
+				// Too narrow, need to truncate NAME too
+				availableForNameImage := m.width - 24 - stateWidth - statusWidth
+				nameWidth = availableForNameImage / 2
+				imageWidth = availableForNameImage / 2
+				if nameWidth < 10 {
+					nameWidth = 10
 				}
+				if imageWidth < 10 {
+					imageWidth = 10
+				}
+			} else {
+				imageWidth = availableWidth
 			}
-		} else {
-			// Very narrow terminal: use minimums
-			nameWidth = minNameWidth
-			imageWidth = minImageWidth
-			portsWidth = minPortsWidth
 		}
 
-		// Header - build left part, then pin STATE and STATUS to right
-		leftHeader := fmt.Sprintf(" %-*s  %-*s  %-*s  %-*s",
-			idWidth, "ID", nameWidth, "NAME", imageWidth, "IMAGE", portsWidth, "OPENPORTS")
-
-		// STATUS column width (add padding for readability)
-		statusWidth := maxStatusLen + 2
-		if statusWidth < 8 {
-			statusWidth = 8
-		}
-
-		// Right section: STATE + STATUS pinned to right edge
-		rightWidth := stateWidth + 2 + statusWidth // STATE + spacing + STATUS
-
-		// Calculate gap to pin right section to right edge
-		headerGap := m.width - len(leftHeader) - rightWidth - cursorCol
-		if headerGap < 2 {
-			headerGap = 2
-		}
-
-		// Build header with STATE and STATUS pinned right, both left-justified in their columns
-		rightHeader := fmt.Sprintf("%-*s  %-*s", stateWidth, "STATE", statusWidth, "STATUS")
-		headerText := leftHeader + strings.Repeat(" ", headerGap) + rightHeader
-		// Ensure header fills full width
-		if len(headerText) < m.width {
-			headerText += strings.Repeat(" ", m.width-len(headerText))
+		// Header - styled with full width
+		headerText := fmt.Sprintf(" %-12s  %-*s  %-*s  %-*s  %s ",
+			"ID", nameWidth, "NAME", imageWidth, "IMAGE", stateWidth, "STATE", "STATUS")
+		// Pad header to full width
+		headerPadding := m.width - len(headerText)
+		if headerPadding > 0 {
+			headerText += strings.Repeat(" ", headerPadding)
 		}
 		s.WriteString(headerStyle.Render(headerText) + "\n")
 
@@ -1240,39 +948,23 @@ func (m Model) viewListMode() string {
 				image = image[:imageWidth-3] + "..."
 			}
 
-			// Truncate ports if needed
-			portsStr := strings.Join(c.Ports, ", ")
-			if portsStr == "" {
-				portsStr = "-"
-			}
-			if len(portsStr) > portsWidth {
-				portsStr = portsStr[:portsWidth-3] + "..."
-			}
-
 			// Style state based on container status
 			stateText := c.State
-			stateRaw := c.State // Keep unstyled version for width calculation
 			if c.State == "running" {
 				stateText = runningStyle.Render(c.State)
 			} else if c.State == "exited" {
 				stateText = exitedStyle.Render(c.State)
 			}
 
-			// Build left part of line (without cursor)
-			leftPart := fmt.Sprintf(" %-*s  %-*s  %-*s  %-*s",
-				idWidth, c.ID, nameWidth, name, imageWidth, image, portsWidth, portsStr)
+			// Format line with dynamic widths
+			line := fmt.Sprintf(" %-12s  %-*s  %-*s  %-*s  %-*s",
+				c.ID, nameWidth, name, imageWidth, image, stateWidth, stateText, statusWidth, c.Status)
 
-			// Calculate gap to pin STATE and STATUS to right
-			lineGap := m.width - len(leftPart) - rightWidth - cursorCol
-			if lineGap < 2 {
-				lineGap = 2
+			// Pad line to full terminal width
+			linePadding := m.width - len(line) - 2 // -2 for cursor indicator
+			if linePadding > 0 {
+				line += strings.Repeat(" ", linePadding)
 			}
-
-			// Build right section with styled STATE and STATUS, both left-justified
-			statePadding := strings.Repeat(" ", stateWidth-len(stateRaw))
-			rightPart := stateText + statePadding + "  " + fmt.Sprintf("%-*s", statusWidth, c.Status)
-
-			line := leftPart + strings.Repeat(" ", lineGap) + rightPart
 
 			if i == m.cursor {
 				// Highlight selected line - full width
@@ -1296,10 +988,35 @@ func (m Model) viewListMode() string {
 		s.WriteString(statusStyle.Render("● "+m.statusMsg) + "\n\n")
 	}
 
+	// Filter status - styled box
+	var filters []string
+	if m.hideK8s {
+		k8sCount := 0
+		for _, c := range m.allContainers {
+			if strings.HasPrefix(c.Name, "k8s_") {
+				k8sCount++
+			}
+		}
+		filters = append(filters, fmt.Sprintf("K8s: %d hidden "+keyStyle.Render("[h]"), k8sCount))
+	}
+	if m.hideExited {
+		exitedCount := 0
+		for _, c := range m.allContainers {
+			if c.State == "exited" {
+				exitedCount++
+			}
+		}
+		filters = append(filters, fmt.Sprintf("Exited: %d hidden "+keyStyle.Render("[a]"), exitedCount))
+	}
+	if len(filters) > 0 {
+		filterText := "Active Filters: " + strings.Join(filters, " | ")
+		s.WriteString(filterStyle.Render(filterText))
+	}
+
 	// Help text - styled box with highlighted keys
 	helpText := "Controls:\n"
-	helpText += fmt.Sprintf("  Navigation: %s Up  %s Down  %s Search\n",
-		keyStyle.Render("↑/k:"), keyStyle.Render("↓/j:"), keyStyle.Render("/:"))
+	helpText += fmt.Sprintf("  Navigation: %s Up  %s Down\n",
+		keyStyle.Render("↑/k:"), keyStyle.Render("↓/j:"))
 	helpText += fmt.Sprintf("  Actions:    %s Start  %s Stop  %s Restart  %s Shell  %s Browser\n",
 		keyStyle.Render("s:"), keyStyle.Render("t:"), keyStyle.Render("R:"), keyStyle.Render("e/x:"), keyStyle.Render("o:"))
 	helpText += fmt.Sprintf("  Info:       %s Inspect  %s Logs\n",
@@ -1461,144 +1178,6 @@ func (m Model) viewShellMode() string {
 		Height(popupHeight)
 
 	popup := popupStyle.Render(shellContent.String())
-
-	// Center the popup on the screen
-	vOffset := (m.height - popupHeight) / 2
-	if vOffset < 0 {
-		vOffset = 0
-	}
-
-	var result strings.Builder
-	for i := 0; i < vOffset; i++ {
-		result.WriteString("\n")
-	}
-
-	// Add horizontal centering
-	hOffset := (m.width - popupWidth) / 2
-	if hOffset < 0 {
-		hOffset = 0
-	}
-
-	// Split popup into lines and add horizontal offset
-	popupLines := strings.Split(popup, "\n")
-	for _, line := range popupLines {
-		result.WriteString(strings.Repeat(" ", hOffset) + line + "\n")
-	}
-
-	return result.String()
-}
-
-// viewSearchMode renders the fuzzy search overlay
-func (m Model) viewSearchMode() string {
-	// Calculate popup dimensions (70% of terminal size, min 50x15)
-	popupWidth := int(float64(m.width) * 0.7)
-	if popupWidth < 50 {
-		popupWidth = 50
-	}
-	if popupWidth > m.width-4 {
-		popupWidth = m.width - 4
-	}
-
-	popupHeight := int(float64(m.height) * 0.6)
-	if popupHeight < 15 {
-		popupHeight = 15
-	}
-	if popupHeight > m.height-4 {
-		popupHeight = m.height - 4
-	}
-
-	// Create search content
-	var searchContent strings.Builder
-
-	// Title
-	searchTitle := "🔍 Search"
-	searchContent.WriteString(titleStyle.Render(searchTitle) + "\n")
-	searchContent.WriteString(dividerStyle.Render(strings.Repeat("─", popupWidth-6)) + "\n\n")
-
-	// Search input
-	searchPrompt := primaryColor
-	inputStyle := lipgloss.NewStyle().Foreground(searchPrompt).Bold(true)
-	searchContent.WriteString(inputStyle.Render("> ") + m.searchInput + "█\n\n")
-
-	// Results area
-	resultHeight := popupHeight - 10
-	if resultHeight < 5 {
-		resultHeight = 5
-	}
-
-	if len(m.searchResults) == 0 {
-		mutedStyle := lipgloss.NewStyle().Foreground(mutedColor)
-		searchContent.WriteString(mutedStyle.Render("  No results found\n"))
-	} else {
-		// Show results with scroll if needed
-		startIdx := 0
-		if m.searchCursor >= resultHeight {
-			startIdx = m.searchCursor - resultHeight + 1
-		}
-		endIdx := startIdx + resultHeight
-		if endIdx > len(m.searchResults) {
-			endIdx = len(m.searchResults)
-		}
-
-		for i := startIdx; i < endIdx; i++ {
-			result := m.searchResults[i]
-
-			// Format result line
-			var line string
-			if result.resultType == "container" {
-				// Container result with icon
-				line = fmt.Sprintf("📦 %s", result.display)
-			} else {
-				// Command result with icon
-				line = fmt.Sprintf("⚡ %s", result.display)
-			}
-
-			// Truncate if too long
-			maxLen := popupWidth - 10
-			if len(line) > maxLen {
-				line = line[:maxLen-3] + "..."
-			}
-
-			if i == m.searchCursor {
-				// Highlight selected result
-				searchContent.WriteString(selectedStyle.Render("▶ "+line) + "\n")
-				// Show description for selected item
-				descStyle := lipgloss.NewStyle().Foreground(mutedColor).Italic(true)
-				desc := result.description
-				if len(desc) > maxLen {
-					desc = desc[:maxLen-3] + "..."
-				}
-				searchContent.WriteString(descStyle.Render("    "+desc) + "\n")
-			} else {
-				searchContent.WriteString("  " + line + "\n")
-			}
-		}
-
-		// Show scroll indicator if needed
-		if len(m.searchResults) > resultHeight {
-			mutedStyle := lipgloss.NewStyle().Foreground(mutedColor)
-			searchContent.WriteString(mutedStyle.Render(fmt.Sprintf("\n  Showing %d-%d of %d results",
-				startIdx+1, endIdx, len(m.searchResults))))
-		}
-	}
-
-	// Help text at bottom
-	searchContent.WriteString("\n")
-	searchContent.WriteString(dividerStyle.Render(strings.Repeat("─", popupWidth-6)) + "\n")
-	helpText := fmt.Sprintf("%s navigate  %s select  %s cancel",
-		keyStyle.Render("↑↓"), keyStyle.Render("ENTER"), keyStyle.Render("ESC"))
-	mutedStyle := lipgloss.NewStyle().Foreground(mutedColor)
-	searchContent.WriteString(mutedStyle.Render(helpText))
-
-	// Create popup box with border
-	popupStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(primaryColor).
-		Padding(1, 2).
-		Width(popupWidth).
-		Height(popupHeight)
-
-	popup := popupStyle.Render(searchContent.String())
 
 	// Center the popup on the screen
 	vOffset := (m.height - popupHeight) / 2
