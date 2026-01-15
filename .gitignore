@@ -38,7 +38,7 @@ dist/
 build/
 
 # Task management
-#tasks/
+\#tasks/
 
 # Backup files
 *.bak*
