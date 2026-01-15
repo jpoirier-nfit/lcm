@@ -1166,10 +1166,27 @@ func (m Model) viewListMode() string {
 		var nameWidth, imageWidth, portsWidth int
 
 		if availableForVariable >= totalContentWidth {
-			// Enough space for all content
+			// Enough space for all content - distribute extra space proportionally
+			// Start with content widths
 			nameWidth = maxNameLen
 			imageWidth = maxImageLen
 			portsWidth = maxPortsLen
+
+			// Calculate extra space and distribute it
+			extraSpace := availableForVariable - totalContentWidth
+			if extraSpace > 0 {
+				// Distribute extra space: 50% to NAME, 35% to IMAGE, 15% to OPENPORTS
+				// NAME gets more since it's typically the most important identifier
+				nameWidth += (extraSpace * 50) / 100
+				imageWidth += (extraSpace * 35) / 100
+				portsWidth += (extraSpace * 15) / 100
+
+				// Distribute any remaining space due to rounding
+				remaining := availableForVariable - (nameWidth + imageWidth + portsWidth)
+				if remaining > 0 {
+					nameWidth += remaining
+				}
+			}
 		} else if availableForVariable >= minNameWidth+minImageWidth+minPortsWidth {
 			// Constrained: distribute proportionally with minimums
 			nameWidth = max(minNameWidth, availableForVariable*maxNameLen/totalContentWidth)
