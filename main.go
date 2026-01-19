@@ -134,6 +134,10 @@ type Model struct {
 	searchInput   string         // Current search query
 	searchResults []searchResult // Filtered search results
 	searchCursor  int            // Selected result index
+
+	// Confirmation dialog state
+	confirmingDestroy  bool   // Whether we're in destroy confirmation mode
+	containerToDestroy string // Container ID to destroy if confirmed
 }
 
 // searchResult represents a fuzzy search match
@@ -321,7 +325,7 @@ func main() {
 	p := tea.NewProgram(
 		model,
 		tea.WithAltScreen(),       // Use alternate screen buffer (full screen)
-		tea.WithMouseCellMotion(), // Enable mouse support
+		tea.WithMouseCellMotion(), // Enable mouse support (text selection available via Shift+drag)
 	)
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error running program: %v\n", err)
@@ -479,6 +483,28 @@ func (m Model) restartContainer() tea.Msg {
 	}
 
 	return operationCompleteMsg{true, fmt.Sprintf("Restarted container %s", containerID)}
+}
+
+// destroyContainer removes the selected container (must be stopped first).
+//
+// This operation permanently deletes the container and its associated data.
+// The container must be stopped before it can be removed. If the container is
+// running, this will fail with an appropriate error message.
+//
+// A confirmation dialog (via confirmingDestroy state) should be shown before
+// calling this function to prevent accidental deletion.
+func (m Model) destroyContainer() tea.Msg {
+	if len(m.containers) == 0 {
+		return operationCompleteMsg{false, "No container selected"}
+	}
+
+	containerID := m.containers[m.cursor].ID
+	err := m.dockerClient.ContainerRemove(m.ctx, containerID, container.RemoveOptions{})
+	if err != nil {
+		return operationCompleteMsg{false, fmt.Sprintf("Failed to destroy: %v", err)}
+	}
+
+	return operationCompleteMsg{true, fmt.Sprintf("Destroyed container %s", containerID)}
 }
 // openBrowserForContainer opens a web browser for the first available HTTP port of the selected container
 func (m Model) openBrowserForContainer() tea.Cmd {
@@ -704,6 +730,7 @@ func (m *Model) updateSearchResults() {
 		{"s", "Start", "Start the selected container"},
 		{"t", "Stop", "Stop the selected container"},
 		{"R", "Restart", "Restart the selected container"},
+		{"d", "Destroy", "Permanently remove the selected container"},
 		{"i", "Inspect", "View container details"},
 		{"l", "Logs", "View container logs"},
 		{"e", "Shell", "Open shell in container"},
@@ -740,6 +767,16 @@ func (m *Model) executeSearchCommand(command string) tea.Cmd {
 	case "R":
 		m.statusMsg = "Restarting container..."
 		return m.restartContainer
+	case "d":
+		// Destroy container - show confirmation dialog
+		if len(m.containers) > 0 {
+			containerName := m.containers[m.cursor].Name
+			containerID := m.containers[m.cursor].ID
+			m.confirmingDestroy = true
+			m.containerToDestroy = containerID
+			m.statusMsg = fmt.Sprintf("⚠️  Destroy container '%s'? [y/n]", containerName)
+		}
+		return nil
 	case "i":
 		m.statusMsg = "Loading inspection data..."
 		return m.inspectContainer
@@ -783,11 +820,28 @@ func (m *Model) executeSearchCommand(command string) tea.Cmd {
 	return nil
 }
 
+// enablePasteCmd returns a command to enable bracketed paste support.
+//
+// Bracketed paste mode allows the application to distinguish between typed text
+// and pasted text. When enabled, pasted content is received as KeyMsg events with
+// the Paste field set to true, and the pasted text available in the Runes field.
+//
+// This is automatically disabled when the program exits.
+//
+// Integration points:
+//   - Called in Init() to enable paste support at program startup
+//   - Paste events are handled in Update() via KeyMsg with Paste=true
+//   - Supported in shell view (appends to command input) and search view (appends to search query)
+func enablePasteCmd() tea.Msg {
+	return tea.EnableBracketedPaste()
+}
+
 // Init is called when the program starts
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.loadContainers(false), // Don't show refresh message on initial load
 		tickCmd(),               // Start auto-refresh ticker
+		enablePasteCmd,          // Enable clipboard paste support
 	)
 }
 
@@ -799,6 +853,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 	case tea.KeyMsg:
+		// Handle clipboard paste events (bracketed paste mode)
+		//
+		// Bracketed paste is enabled via tea.EnableBracketedPaste() in Init().
+		// When users paste content (Cmd+V/Ctrl+V), the terminal sends the entire
+		// pasted text as a single KeyMsg with:
+		//   - Paste field = true (indicates this is a paste operation)
+		//   - Runes field = the complete pasted text as []rune
+		//
+		// This allows us to distinguish between typed input and pasted content,
+		// and handle multi-line or large pastes efficiently in one operation.
+		//
+		// Paste handling by view:
+		//   - viewShell: Appends to shell command input (useful for pasting commands)
+		//   - viewSearch: Appends to search query and updates results (useful for searching container names/IDs)
+		//   - Other views: Paste events are ignored
+		//
+		// Note: To copy text FROM the terminal, users should hold Shift while
+		// selecting text with the mouse, then use Cmd+C (Mac) or Ctrl+Shift+C (Linux).
+		if msg.Paste {
+			pastedText := string(msg.Runes)
+			switch m.currentView {
+			case viewShell:
+				// In shell view, append pasted text to shell input
+				m.shellInput += pastedText
+				return m, nil
+			case viewSearch:
+				// In search view, append pasted text to search input and update results
+				m.searchInput += pastedText
+				m.updateSearchResults()
+				return m, nil
+			}
+			// For other views, ignore paste events
+			return m, nil
+		}
 		// Handle different views
 		switch m.currentView {
 		case viewInspect, viewLogs:
@@ -890,6 +978,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case viewList:
+			// Handle confirmation dialog for destroy operation
+			if m.confirmingDestroy {
+				switch msg.String() {
+				case "y", "Y":
+					// User confirmed - destroy the container
+					m.confirmingDestroy = false
+					m.statusMsg = "Destroying container..."
+					return m, m.destroyContainer
+				case "n", "N", "esc":
+					// User cancelled - clear confirmation state
+					m.confirmingDestroy = false
+					m.containerToDestroy = ""
+					m.statusMsg = "Destroy cancelled"
+					return m, clearStatusAfterDelay(2 * time.Second)
+				}
+				// Ignore other keys during confirmation
+				return m, nil
+			}
+
 			// In list view, handle all navigation and actions
 			switch msg.String() {
 			case "ctrl+c", "q":
@@ -939,6 +1046,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.containers) > 0 {
 					m.statusMsg = "Opening browser..."
 					return m, m.openBrowserForContainer()
+				}
+			case "d":
+				// Destroy container - show confirmation dialog
+				if len(m.containers) > 0 {
+					containerName := m.containers[m.cursor].Name
+					containerID := m.containers[m.cursor].ID
+					m.confirmingDestroy = true
+					m.containerToDestroy = containerID
+					m.statusMsg = fmt.Sprintf("⚠️  Destroy container '%s'? [y/n]", containerName)
 				}
 			case "h":
 				// Toggle hiding k8s containers
@@ -1233,15 +1349,26 @@ func (m Model) viewListMode() string {
 
 		// Build header with STATE and STATUS pinned right, both left-justified in their columns
 		rightHeader := fmt.Sprintf("%-*s  %-*s", stateWidth, "STATE", statusWidth, "STATUS")
+		// Ensure headerGap is non-negative
+		if headerGap < 0 {
+			headerGap = 0
+		}
 		headerText := leftHeader + strings.Repeat(" ", headerGap) + rightHeader
 		// Ensure header fills full width
 		if len(headerText) < m.width {
-			headerText += strings.Repeat(" ", m.width-len(headerText))
+			padding := m.width - len(headerText)
+			if padding > 0 {
+				headerText += strings.Repeat(" ", padding)
+			}
 		}
 		s.WriteString(headerStyle.Render(headerText) + "\n")
 
 		// Full width divider
-		s.WriteString(dividerStyle.Render(strings.Repeat("─", m.width)) + "\n")
+		dividerWidth := m.width
+		if dividerWidth < 1 {
+			dividerWidth = 1
+		}
+		s.WriteString(dividerStyle.Render(strings.Repeat("─", dividerWidth)) + "\n")
 
 		// Container list (scrollable window)
 		for i := startIdx; i < endIdx; i++ {
@@ -1286,9 +1413,17 @@ func (m Model) viewListMode() string {
 			}
 
 			// Build right section with styled STATE and STATUS, both left-justified
-			statePadding := strings.Repeat(" ", stateWidth-len(stateRaw))
+			paddingCount := stateWidth - len(stateRaw)
+			if paddingCount < 0 {
+				paddingCount = 0
+			}
+			statePadding := strings.Repeat(" ", paddingCount)
 			rightPart := stateText + statePadding + "  " + fmt.Sprintf("%-*s", statusWidth, c.Status)
 
+			// Ensure lineGap is non-negative
+			if lineGap < 0 {
+				lineGap = 0
+			}
 			line := leftPart + strings.Repeat(" ", lineGap) + rightPart
 
 			if i == m.cursor {
@@ -1317,8 +1452,8 @@ func (m Model) viewListMode() string {
 	helpText := "Controls:\n"
 	helpText += fmt.Sprintf("  Navigation: %s Up  %s Down  %s Search\n",
 		keyStyle.Render("↑/k:"), keyStyle.Render("↓/j:"), keyStyle.Render("/:"))
-	helpText += fmt.Sprintf("  Actions:    %s Start  %s Stop  %s Restart  %s Shell  %s Browser\n",
-		keyStyle.Render("s:"), keyStyle.Render("t:"), keyStyle.Render("R:"), keyStyle.Render("e/x:"), keyStyle.Render("o:"))
+	helpText += fmt.Sprintf("  Actions:    %s Start  %s Stop  %s Restart  %s Shell  %s Browser  %s Destroy\n",
+		keyStyle.Render("s:"), keyStyle.Render("t:"), keyStyle.Render("R:"), keyStyle.Render("e/x:"), keyStyle.Render("o:"), keyStyle.Render("d:"))
 	helpText += fmt.Sprintf("  Info:       %s Inspect  %s Logs\n",
 		keyStyle.Render("i:"), keyStyle.Render("l:"))
 	helpText += fmt.Sprintf("  Filters:    %s K8s  %s Exited\n",
