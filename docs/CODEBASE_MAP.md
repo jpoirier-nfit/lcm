@@ -62,7 +62,7 @@ lcm/
 ├── main_test.go          # Unit tests (4KB)
 ├── go.mod                # Dependencies
 ├── go.sum                # Dependency checksums
-├── Makefile              # Build automation
+├── Taskfile.yml          # Task automation
 ├── README.md             # Project documentation
 ├── lcm                   # Compiled binary
 └── docs/
@@ -78,7 +78,7 @@ lcm/
 | main.go | TUI app logic, views, container ops | Model type, Update/View/Init methods, Docker integration | ~10,000 |
 | main_test.go | Unit tests | Platform detection, struct validation | ~800 |
 | go.mod | Dependency management | Bubbletea, Lipgloss, Docker SDK | ~100 |
-| Makefile | Build automation | build, test, install, lint targets | ~200 |
+| Taskfile.yml | Task automation | build, test, install, lint tasks | ~60 |
 | README.md | Documentation | Features, usage, keyboard controls | ~1,000 |
 
 ## Module Guide
@@ -176,20 +176,20 @@ lcm/
 
 ---
 
-### Build Configuration (Makefile)
+### Build Configuration (Taskfile.yml)
 
-**Purpose**: Build automation and development workflow
+**Purpose**: Task automation and development workflow
 
-**Targets**:
+**Tasks**:
 - `build` - Compile binary
 - `run` - Execute with `go run`
 - `test` - Run test suite
-- `install` - Install to /usr/local/bin (or $PREFIX)
-- `uninstall` - Remove from $PREFIX/bin
+- `install` - Install to /usr/local/bin (or PREFIX)
+- `uninstall` - Remove from PREFIX/bin
 - `clean` - Remove build artifacts
 - `fmt` - Format code
 - `lint` - Run golangci-lint (requires external tool)
-- `help` - Display target descriptions (default)
+- `default` - Display task list (default)
 
 **Configuration**: `PREFIX` variable (default: /usr/local)
 
@@ -472,19 +472,19 @@ Priority-ordered auto-detection:
 
 ```bash
 # Development
-make run              # Run without building
-make build            # Build binary
-make test             # Run tests
-make fmt              # Format code
-make lint             # Run linter (requires golangci-lint)
+task run              # Run without building
+task build            # Build binary
+task test             # Run tests
+task fmt              # Format code
+task lint             # Run linter (requires golangci-lint)
 
 # Installation
-make install          # Install to /usr/local/bin
-make uninstall        # Remove from /usr/local/bin
-PREFIX=/custom make install  # Custom install location
+task install          # Install to /usr/local/bin
+task uninstall        # Remove from /usr/local/bin
+task install PREFIX=/custom  # Custom install location
 
 # Cleanup
-make clean            # Remove build artifacts
+task clean            # Remove build artifacts
 ```
 
 ### Testing
@@ -498,7 +498,7 @@ go test -cover ./...  # With coverage
 ### Dependencies
 
 ```bash
-make deps             # Download and tidy dependencies
+task deps             # Download and tidy dependencies
 go mod tidy           # Tidy go.mod
 go mod vendor         # Vendor dependencies
 ```

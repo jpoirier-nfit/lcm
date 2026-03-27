@@ -1,0 +1,66 @@
+version: '3'
+
+vars:
+  PREFIX: /usr/local
+  BINDIR: '{{.PREFIX}}/bin'
+
+tasks:
+  default:
+    desc: Display available tasks
+    cmds:
+      - task --list
+
+  build:
+    desc: Build the application
+    cmds:
+      - go build -o lcm .
+
+  run:
+    desc: Run the application
+    cmds:
+      - go run .
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -f lcm docker-tui
+
+  test:
+    desc: Run tests
+    cmds:
+      - go test ./...
+
+  deps:
+    desc: Download and tidy dependencies
+    cmds:
+      - go mod download
+      - go mod tidy
+
+  fmt:
+    desc: Format code with go fmt
+    cmds:
+      - go fmt ./...
+
+  lint:
+    desc: Run linter (requires golangci-lint)
+    cmds:
+      - cmd: command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint not installed. Run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; exit 1; }
+        silent: true
+      - golangci-lint run ./...
+
+  install:
+    desc: Install to {{.BINDIR}} (may require sudo)
+    deps: [build]
+    cmds:
+      - echo "Installing lcm to {{.BINDIR}}..."
+      - mkdir -p {{.BINDIR}}
+      - install -m 755 lcm {{.BINDIR}}/lcm
+      - echo "lcm installed successfully to {{.BINDIR}}/lcm"
+      - echo "Run 'lcm' from anywhere to start the application"
+
+  uninstall:
+    desc: Uninstall from {{.BINDIR}}
+    cmds:
+      - echo "Removing lcm from {{.BINDIR}}..."
+      - rm -f {{.BINDIR}}/lcm
+      - echo "lcm uninstalled successfully"

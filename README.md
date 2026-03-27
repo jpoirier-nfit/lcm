@@ -4,7 +4,6 @@ A Terminal User Interface (TUI) for managing local Docker containers, built with
 
 <img width="1344" height="362" alt="image" src="https://github.com/user-attachments/assets/77394de5-ab17-42ad-9682-45fff4e97873" />
 
-
 ## Installation
 
 ### Quick Install (Recommended)
@@ -16,17 +15,19 @@ go install github.com/jpoirier-nfit/lcm@latest
 ```
 
 Verify installation:
+
 ```bash
 lcm
 ```
 
 **Note:** Ensure `$GOPATH/bin` or `$HOME/go/bin` is in your `PATH`.
 
-### System Installation with Make
+### System Installation
 
 Install from source to `/usr/local/bin`:
 
 Clone the repository:
+
 ```bash
 git clone https://github.com/jpoirier-nfit/lcm.git
 ```
@@ -36,18 +37,21 @@ cd lcm
 ```
 
 Install to /usr/local/bin (requires sudo):
+
 ```bash
-sudo make install
+sudo task install
 ```
 
 Or install to custom location (e.g., ~/.local/bin):
+
 ```bash
-make install PREFIX=$HOME/.local
+task install PREFIX=$HOME/.local
 ```
 
 ### Build from Source
 
 Clone and build:
+
 ```bash
 git clone https://github.com/jpoirier-nfit/lcm.git
 ```
@@ -57,22 +61,25 @@ cd lcm
 ```
 
 ```bash
-make build
+task build
 ```
 
 Run locally:
+
 ```bash
 ./lcm
 ```
 
 ### Uninstall
 
-If installed with make:
+If installed with Taskfile:
+
 ```bash
-sudo make uninstall
+sudo task uninstall
 ```
 
 If installed with go install:
+
 ```bash
 rm $(go env GOPATH)/bin/lcm
 ```
@@ -113,15 +120,15 @@ rm $(go env GOPATH)/bin/lcm
 
 ### Supported Container Runtimes
 
-| Platform | Socket Path(s) |
-|----------|---------------|
-| Docker Desktop | `/var/run/docker.sock` |
-| Rancher Desktop | `~/.rd/docker.sock`, `~/.docker/run/docker.sock` |
-| Colima | `~/.colima/default/docker.sock` |
-| Orbstack | `~/.orbstack/run/docker.sock` |
-| Podman | `~/.local/share/containers/podman/machine/podman.sock` (macOS), `/run/user/<uid>/podman/podman.sock` (Linux) |
-| Lima | `~/.lima/default/sock/docker.sock` |
-| DOCKER_HOST | Uses `DOCKER_HOST` environment variable if set |
+| Platform        | Socket Path(s)                                                                                               |
+| --------------- | ------------------------------------------------------------------------------------------------------------ |
+| Docker Desktop  | `/var/run/docker.sock`                                                                                       |
+| Rancher Desktop | `~/.rd/docker.sock`, `~/.docker/run/docker.sock`                                                             |
+| Colima          | `~/.colima/default/docker.sock`                                                                              |
+| Orbstack        | `~/.orbstack/run/docker.sock`                                                                                |
+| Podman          | `~/.local/share/containers/podman/machine/podman.sock` (macOS), `/run/user/<uid>/podman/podman.sock` (Linux) |
+| Lima            | `~/.lima/default/sock/docker.sock`                                                                           |
+| DOCKER_HOST     | Uses `DOCKER_HOST` environment variable if set                                                               |
 
 The application automatically detects and connects to the first available runtime.
 
@@ -173,23 +180,27 @@ lcm
 ## Development
 
 Install dependencies:
+
 ```bash
-make deps
+task deps
 ```
 
 Run tests:
+
 ```bash
-make test
+task test
 ```
 
 Build:
+
 ```bash
-make build
+task build
 ```
 
 Clean build artifacts:
+
 ```bash
-make clean
+task clean
 ```
 
 ## Project Structure
@@ -200,7 +211,7 @@ lcm/
 ├── main_test.go      # Unit tests
 ├── go.mod            # Go module dependencies
 ├── go.sum            # Dependency checksums
-├── Makefile          # Build and run commands
+├── Taskfile.yml      # Task automation
 └── README.md         # This file
 ```
 

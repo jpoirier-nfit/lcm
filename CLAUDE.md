@@ -22,7 +22,7 @@ For detailed architecture, data flows, and navigation guide, see [docs/CODEBASE_
 ## Development Standards
 
 - **Testing**: Unit tests in main_test.go covering platform detection and data structures
-- **Build**: Makefile with standard targets (build, test, install, lint)
+- **Build**: Taskfile with standard tasks (build, test, install, lint)
 - **Code Style**: Single-file Go application following Bubbletea patterns
 - **Dependencies**: Minimal external deps (Bubbletea, Lipgloss, Docker SDK)
 - **Error Handling**: Graceful degradation with status messages in TUI
@@ -31,11 +31,11 @@ For detailed architecture, data flows, and navigation guide, see [docs/CODEBASE_
 
 ```bash
 # Build and run
-make build && ./lcm
+task build && ./lcm
 
 # Run tests
-make test
+task test
 
 # Install
-make install
+task install
 ```
